@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mic On/Off Animation</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: #0f172a;
+    font-family: system-ui, sans-serif;
+    color: #e2e8f0;
+  }
+  .wrap { text-align: center; }
+
+  /* rounded-square mic box */
+  .mic-btn {
+    width: 150px;
+    height: 150px;
+    border: none;
+    border-radius: 32px;
+    cursor: pointer;
+    background: #475569;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: background .4s ease, transform .15s ease;
+  }
+  .mic-btn:active { transform: scale(.96); }
+  .mic-btn.on { background: #22c55e; }
+
+  .icon { width: 56px; height: 56px; flex: none; }
+
+  /* slash draws in when OFF */
+  .slash {
+    stroke-dasharray: 30;
+    stroke-dashoffset: 30;
+    transition: stroke-dashoffset .35s ease;
+  }
+  .mic-btn:not(.on) .slash { stroke-dashoffset: 0; }
+
+  /* waveform below the mic, only visible when ON */
+  .wave {
+    height: 0;
+    margin-top: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    opacity: 0;
+    transition: opacity .4s ease, height .4s ease, margin-top .4s ease;
+  }
+  .mic-btn.on .wave { opacity: 1; height: 28px; margin-top: 10px; }
+
+  .wave span {
+    width: 5px;
+    height: 100%;
+    border-radius: 3px;
+    background: #fff;
+    transform: scaleY(.12);
+    will-change: transform;
+  }
+
+  .label { margin-top: 18px; font-size: 18px; letter-spacing: .5px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <button class="mic-btn" id="micBtn" aria-pressed="false" aria-label="Toggle microphone">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3" fill="currentColor"/>
+        <path d="M5 11a7 7 0 0 0 14 0"/>
+        <line x1="12" y1="18" x2="12" y2="22"/>
+        <line x1="8" y1="22" x2="16" y2="22"/>
+        <line class="slash" x1="3" y1="3" x2="21" y2="21" stroke="#fff" stroke-width="2.5"/>
+      </svg>
+      <div class="wave" id="wave">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </button>
+    <div class="label" id="label">Mic is OFF</div>
+  </div>
+
+<script>
+  const btn = document.getElementById('micBtn');
+  const label = document.getElementById('label');
+  const bars = [...document.querySelectorAll('#wave span')];
+
+  const MIN = 0.12;
+  const heights = bars.map(() => MIN);   // current (smoothed) scale of each bar
+  let isOn = false;
+  let level = 0;                         // overall amplitude, eased in/out
+  let raf = null;
+
+  function frame(t) {
+    const time = t / 1000;
+    level += ((isOn ? 1 : 0) - level) * 0.08;   // smooth fade of amplitude
+
+    bars.forEach((bar, i) => {
+      // layered sines -> organic, flowing motion
+      const w = Math.sin(time * 3.2 + i * 0.7) * 0.5 + 0.5;
+      const w2 = Math.sin(time * 5.1 + i * 1.3) * 0.5 + 0.5;
+      const centre = 1 - Math.abs(i - (bars.length - 1) / 2) / bars.length; // middle bars taller
+      const target = MIN + (0.25 + 0.75 * (w * 0.6 + w2 * 0.4)) * centre * level;
+      heights[i] += (target - heights[i]) * 0.18;                          // ease toward target
+      bar.style.transform = 'scaleY(' + heights[i].toFixed(3) + ')';
+    });
+
+    if (isOn || level > 0.01) raf = requestAnimationFrame(frame);
+    else raf = null;
+  }
+
+  btn.addEventListener('click', () => {
+    isOn = btn.classList.toggle('on');
+    btn.setAttribute('aria-pressed', isOn);
+    label.textContent = isOn ? 'Mic is ON' : 'Mic is OFF';
+    if (!raf) raf = requestAnimationFrame(frame);
+    // Add your real mic logic here (e.g. navigator.mediaDevices.getUserMedia)
+  });
+</script>
+</body>
+</html>

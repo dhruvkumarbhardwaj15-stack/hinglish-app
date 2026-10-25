@@ -439,31 +439,129 @@ export function generateSmartVariants(word: string, primary: string): string[] {
   return Array.from(alts).filter(isPureHindi).slice(0, 4);
 }
 
-// Instant local transliteration for verified dictionary words
+// Phonetic rules for converting any Romanized word into Devanagari
+const PHONETIC_VOWELS: { key: string; independent: string; matra: string }[] = [
+  { key: "aa", independent: "आ", matra: "ा" },
+  { key: "ai", independent: "ऐ", matra: "ै" },
+  { key: "au", independent: "औ", matra: "ौ" },
+  { key: "ee", independent: "ई", matra: "ी" },
+  { key: "ii", independent: "ई", matra: "ी" },
+  { key: "oo", independent: "ऊ", matra: "ू" },
+  { key: "uu", independent: "ऊ", matra: "ू" },
+  { key: "a", independent: "अ", matra: "" },
+  { key: "i", independent: "इ", matra: "ि" },
+  { key: "u", independent: "उ", matra: "ु" },
+  { key: "e", independent: "ए", matra: "े" },
+  { key: "o", independent: "ओ", matra: "ो" },
+];
+
+const PHONETIC_CONSONANTS: { key: string; hindi: string }[] = [
+  { key: "cch", hindi: "च्छ" }, { key: "chh", hindi: "छ" }, { key: "ksh", hindi: "क्ष" },
+  { key: "kh", hindi: "ख" }, { key: "gh", hindi: "घ" }, { key: "ch", hindi: "च" },
+  { key: "jh", hindi: "झ" }, { key: "th", hindi: "थ" }, { key: "dh", hindi: "ध" },
+  { key: "ph", hindi: "फ" }, { key: "bh", hindi: "भ" }, { key: "sh", hindi: "श" },
+  { key: "k", hindi: "क" }, { key: "g", hindi: "ग" }, { key: "c", hindi: "क" },
+  { key: "j", hindi: "ज" }, { key: "t", hindi: "त" }, { key: "d", hindi: "द" },
+  { key: "n", hindi: "न" }, { key: "p", hindi: "प" }, { key: "f", hindi: "फ़" },
+  { key: "b", hindi: "ब" }, { key: "m", hindi: "म" }, { key: "y", hindi: "य" },
+  { key: "r", hindi: "र" }, { key: "l", hindi: "ल" }, { key: "v", hindi: "व" },
+  { key: "w", hindi: "व" }, { key: "s", hindi: "स" }, { key: "h", hindi: "ह" },
+  { key: "z", hindi: "ज़" }, { key: "q", hindi: "क़" }, { key: "x", hindi: "क्स" },
+];
+
+const isLatinLetter = (ch: string | undefined) => Boolean(ch && /[a-z]/.test(ch));
+const isVowelLetter = (ch: string | undefined) => Boolean(ch && /[aeiou]/.test(ch));
+
+// Rule-based transliteration so every Hinglish word gets a Devanagari form
+export function phoneticTransliterate(word: string): string {
+  const src = word.toLowerCase();
+  let out = "";
+  let prevConsonant = false;
+  let i = 0;
+
+  while (i < src.length) {
+    const ch = src[i];
+
+    // Keep digits, punctuation and existing Devanagari untouched
+    if (!isLatinLetter(ch)) {
+      out += ch;
+      prevConsonant = false;
+      i++;
+      continue;
+    }
+
+    const vowel = PHONETIC_VOWELS.find(v => src.startsWith(v.key, i));
+    if (vowel) {
+      const isLast = !isLatinLetter(src[i + vowel.key.length]);
+      if (prevConsonant) {
+        // Hinglish word-final 'a' / 'i' usually stand for long vowels (accha -> अच्छा, pani -> पानी)
+        if (isLast && vowel.key === "a" && out.length > 1) out += "ा";
+        else if (isLast && vowel.key === "i") out += "ी";
+        else out += vowel.matra;
+      } else {
+        out += vowel.independent;
+      }
+      prevConsonant = false;
+      i += vowel.key.length;
+      continue;
+    }
+
+    const consonant = PHONETIC_CONSONANTS.find(c => src.startsWith(c.key, i))!;
+    const next = src[i + consonant.key.length];
+
+    // Nasal 'n' after a vowel before another consonant becomes anusvara (hindi -> हिंदी)
+    if (consonant.key === "n" && out && !prevConsonant && isLatinLetter(next) && !isVowelLetter(next) && !"nyhrwv".includes(next!)) {
+      out += "ं";
+      i++;
+      continue;
+    }
+
+    if (prevConsonant) out += "्";
+    out += consonant.hindi;
+    prevConsonant = true;
+    i += consonant.key.length;
+  }
+
+  return out;
+}
+
+// Convert a single token: dictionary first, then phonetic rules. Never returns Latin letters.
+export function localTransliterateToken(token: string): WordMetadata {
+  const cleanWord = token.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const punctuation = token.replace(/[a-z0-9]/gi, '');
+
+  const dictEntry = HINGLISH_DICT[cleanWord];
+  if (dictEntry) {
+    const alts: WordAlternative[] = dictEntry.alts.map((h, idx) => ({
+      hindi: h.includes(punctuation) ? h : h + punctuation,
+      meaning: cleanWord,
+      isDefault: idx === 0
+    }));
+    return {
+      original: token,
+      alternatives: alts,
+      selectedHindi: dictEntry.default + punctuation
+    };
+  }
+
+  const primary = phoneticTransliterate(token);
+  const alts: WordAlternative[] = generateSmartVariants(token, primary).map((h, idx) => ({
+    hindi: h,
+    meaning: cleanWord || token,
+    isDefault: idx === 0
+  }));
+
+  return {
+    original: token,
+    alternatives: alts,
+    selectedHindi: primary
+  };
+}
+
+// Instant local transliteration: dictionary words plus phonetic conversion for everything else
 export function fastLocalTransliterate(input: string): AdvancedTransliterationResult {
   const tokens = input.trim().split(/\s+/).filter(Boolean);
-  const words: WordMetadata[] = [];
-
-  for (const token of tokens) {
-    const cleanWord = token.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const punctuation = token.replace(/[a-z0-9]/gi, '');
-
-    const dictEntry = HINGLISH_DICT[cleanWord];
-    if (dictEntry) {
-      const selectedHindi = dictEntry.default + punctuation;
-      const alts: WordAlternative[] = dictEntry.alts.map((h, idx) => ({
-        hindi: h.includes(punctuation) ? h : h + punctuation,
-        meaning: cleanWord,
-        isDefault: idx === 0
-      }));
-
-      words.push({
-        original: token,
-        alternatives: alts,
-        selectedHindi
-      });
-    }
-  }
+  const words: WordMetadata[] = tokens.map(localTransliterateToken);
 
   const sentenceHindi = words.map(w => w.selectedHindi).join(' ');
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { transliterateHinglish } from './services/geminiService.ts';
-import { canBeFullyTransliteratedLocally, clearCorruptedCache, fastLocalTransliterate } from './services/fastDictionary.ts';
+import { clearCorruptedCache, fastLocalTransliterate } from './services/fastDictionary.ts';
 import { HindiResult, HistoryItem, WordMetadata } from './types.ts';
 import Header from './components/Header.tsx';
 import InputArea from './components/InputArea.tsx';
@@ -71,17 +71,15 @@ const App: React.FC = () => {
 
     setIsLoading(true);
 
-    // Instant preview ONLY if 100% of words are verified dictionary entries (zero hybrid words)
-    if (canBeFullyTransliteratedLocally(trimmed)) {
-      const instantData = fastLocalTransliterate(trimmed);
-      if (instantData.words.length > 0) {
-        setResults(instantData.results);
-        setWords(instantData.words);
-      }
+    // Instant preview: every word converted locally (dictionary + phonetic), refined by AI below
+    const instantData = fastLocalTransliterate(trimmed);
+    if (instantData.words.length > 0) {
+      setResults(instantData.results);
+      setWords(instantData.words);
     }
 
     try {
-      // Complete, pure Devanagari transliteration via Gemini AI
+      // Complete, pure Devanagari transliteration via Gemini AI (one output word per input word)
       const data = await transliterateHinglish(trimmed);
       if (data && data.words && data.words.length > 0) {
         setResults(data.results);
